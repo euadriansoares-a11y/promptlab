@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Biblioteca de Prormpts",
+  "description": "Uma isca digital futurista para copiar um prompt de análise de Instagram e vender um infoproduto.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
