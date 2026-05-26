@@ -16,14 +16,17 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 export async function webhookCakto(req: any, res: any) {
   try {
     const payload = req.body;
+    console.log("[CAKTO WEBHOOK] Recebido Payload completo:", JSON.stringify(payload));
 
     // 1. Validar webhook secret
     if (payload.secret !== CAKTO_WEBHOOK_SECRET) {
+      console.warn(`[CAKTO WEBHOOK] Secret Invalido! Recebido: ${payload?.secret} | Esperado: ${CAKTO_WEBHOOK_SECRET}`);
       return res.status(401).json({ error: "Secret inválido" });
     }
 
     // 2. Verificar se o evento é purchase_approved
     if (payload.event !== "purchase_approved") {
+      console.log(`[CAKTO WEBHOOK] Evento ignorado: ${payload.event}`);
       return res.status(200).json({ status: "ignorado", message: "Evento não é purchase_approved" });
     }
 
@@ -46,23 +49,16 @@ export async function webhookCakto(req: any, res: any) {
     let userId = existingUser?.id;
 
     if (!existingUser) {
-      // Gerar senha segura
-      const generatedPassword = crypto.randomBytes(12).toString("base64url");
-      
-      // Criar novo usuário
-      const { data: newUserData, error: createError } = await supabase.auth.admin.createUser({
-        email: email,
-        password: generatedPassword,
-        email_confirm: true,
-        user_metadata: { full_name: name, phone: phone }
+      // Criar novo usuário e enviar um convite (Invite) por e-mail automaticamente pelo Supabase.
+      // O Supabase enviará um link para o cliente criar a própria senha e acessar a plataforma.
+      const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
+        data: { full_name: name, phone: phone }
       });
 
-      if (createError) throw createError;
-      userId = newUserData.user?.id;
+      if (inviteError) throw inviteError;
+      userId = inviteData.user?.id;
 
-      // TODO: Aqui você faria o envio de e-mail de boas-vindas com email, nome e senha temporária
-      // EX: await sendEmail(email, name, generatedPassword);
-      console.log(`[INFO] Novo usuário criado. E-mail: ${email} | Senha provisória: ${generatedPassword}`);
+      console.log(`[INFO] Convite enviado para o novo usuário. E-mail: ${email}`);
     }
 
     if (!userId) throw new Error("Não foi possível resolver o ID do usuário.");

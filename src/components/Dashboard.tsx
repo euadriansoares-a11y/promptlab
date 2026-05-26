@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { CATEGORIES } from '../data';
-import { Copy, Check, Sparkles, LogOut, Terminal, Heart, ChevronRight, Zap } from 'lucide-react';
+import { Copy, Check, Sparkles, LogOut, Terminal, Heart, ChevronRight, Zap, Play, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const VerifiedBadge = () => (
@@ -18,6 +18,8 @@ export default function Dashboard() {
   const [activeSlides, setActiveSlides] = useState<{ [id: number]: number }>({});
   const [likedIds, setLikedIds] = useState<number[]>([]);
   const [doubleClickedId, setDoubleClickedId] = useState<number | null>(null);
+  const [playingTutorials, setPlayingTutorials] = useState<{ [id: string]: boolean }>({});
+  const [showInitialPopup, setShowInitialPopup] = useState(true);
 
   useEffect(() => {
     async function fetchPrompts() {
@@ -95,12 +97,22 @@ export default function Dashboard() {
              Codigo<span className="text-yellow-500">DaIA</span>
            </span>
          </div>
-         <button 
-           onClick={handleSignOut}
-           className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 text-sm"
-         >
-           <LogOut className="w-4 h-4" /> <span className="hidden md:inline">Sair</span>
-         </button>
+         <div className="flex items-center gap-4 md:gap-6">
+           <button 
+             onClick={() => document.getElementById('tutoriais')?.scrollIntoView({ behavior: 'smooth' })}
+             className="inline-flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-xl bg-white/5 border border-white/10 text-xs md:text-sm text-white font-semibold hover:bg-white/10 transition-colors"
+           >
+             <Play className="w-3.5 h-3.5 md:w-4 md:h-4 text-yellow-500 fill-yellow-500" />
+             <span className="hidden md:inline">Assistir Tutorial</span>
+             <span className="md:hidden">Tutorial</span>
+           </button>
+           <button 
+             onClick={handleSignOut}
+             className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 text-sm"
+           >
+             <LogOut className="w-4 h-4" /> <span className="hidden md:inline">Sair</span>
+           </button>
+         </div>
       </header>
 
       <main className="w-full max-w-7xl mx-auto px-4 md:px-6 py-12 relative z-10 flex flex-col items-center text-center">
@@ -116,7 +128,7 @@ export default function Dashboard() {
           <h1 className="font-[Space_Grotesk] text-3xl md:text-5xl font-bold tracking-tighter mb-4 text-white">
             Biblioteca de <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-500">Prompts</span>
           </h1>
-          <p className="text-gray-400 text-sm md:text-base font-medium max-w-2xl mx-auto">
+          <p className="text-gray-400 text-sm md:text-base font-medium max-w-2xl mx-auto mb-6">
             Todos os prompts estratégicos desbloqueados. Deslize os cards, copie o texto com um clique e cole diretamente na sua ferramenta de IA de preferência.
           </p>
         </motion.div>
@@ -281,7 +293,113 @@ export default function Dashboard() {
             );
           })}
         </div>
+
+        {/* Tutorial Section (Bottom) */}
+        <div id="tutoriais" className="w-full max-w-5xl border border-neutral-900 bg-[#0c0c0e] rounded-3xl p-6 md:p-10 flex flex-col items-center gap-8 md:gap-12 mt-4 mb-20 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-yellow-500/5 blur-[100px] rounded-full pointer-events-none" />
+          
+          <div className="text-center z-10 w-full max-w-2xl">
+            <h2 className="text-white font-[Space_Grotesk] font-extrabold text-2xl md:text-3xl mb-4 flex items-center justify-center gap-3">
+              <span className="p-3 bg-yellow-500/10 rounded-full border border-yellow-500/20 text-yellow-500">
+                <Play className="w-6 h-6 fill-yellow-500" />
+              </span>
+              Aprenda na Prática
+            </h2>
+            <p className="text-gray-400 text-sm md:text-base font-medium leading-relaxed">
+              Ainda com dúvidas? Assista aos nossos tutoriais rápidos de como extrair todo o potencial de cada prompt no seu dia a dia.
+            </p>
+          </div>
+
+          <div className="flex flex-col md:flex-row items-center justify-center gap-8 w-full z-10">
+            {/* Tutorial 1 */}
+            <div className="w-full max-w-[280px] md:max-w-[300px] flex flex-col gap-3 group">
+              <div className="w-full aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-neutral-800 shadow-2xl relative">
+                  <iframe 
+                    src="https://player.vimeo.com/video/1195755424?title=0&amp;byline=0&amp;portrait=0&amp;badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479" 
+                    frameBorder="0" 
+                    allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share" 
+                    referrerPolicy="strict-origin-when-cross-origin" 
+                    className="w-full h-full absolute inset-0"
+                    title="1 PASSO: Conecte o Claude no seu instagram"
+                    allowFullScreen
+                  ></iframe>
+              </div>
+              <h3 className="text-white text-center font-[Space_Grotesk] font-bold text-sm md:text-base">1 PASSO: Conecte o Claude no seu instagram</h3>
+            </div>
+
+            {/* Tutorial 2 */}
+            <div className="w-full max-w-[280px] md:max-w-[300px] flex flex-col gap-3 group">
+              <div className="w-full aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-neutral-800 shadow-2xl relative">
+                  <iframe 
+                    src="https://player.vimeo.com/video/1195756442?title=0&amp;byline=0&amp;portrait=0&amp;badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479" 
+                    frameBorder="0" 
+                    allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share" 
+                    referrerPolicy="strict-origin-when-cross-origin" 
+                    className="w-full h-full absolute inset-0"
+                    title="2 PASSO: Aprenda a usar a biblioteca de prompts"
+                    allowFullScreen
+                  ></iframe>
+              </div>
+              <h3 className="text-white text-center font-[Space_Grotesk] font-bold text-sm md:text-base">2 PASSO: Aprenda a usar a biblioteca de prompts</h3>
+            </div>
+          </div>
+        </div>
       </main>
+
+      {/* Initial Tutorial Popup Modal */}
+      <AnimatePresence>
+        {showInitialPopup && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+              onClick={() => setShowInitialPopup(false)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-sm bg-[#0c0c0e] border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl z-10 flex flex-col p-6 text-center isolate"
+            >
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-yellow-500/10 blur-[50px] rounded-full pointer-events-none -z-10" />
+              
+              <div className="w-16 h-16 rounded-full bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mx-auto mb-4">
+                <Play className="w-8 h-8 text-yellow-500 fill-yellow-500 ml-1" />
+              </div>
+              
+              <h3 className="text-white font-[Space_Grotesk] font-bold text-2xl mb-2">
+                Assista o tutorial agora
+              </h3>
+              
+              <p className="text-gray-400 text-sm mb-8">
+                Descubra como extrair o máximo de cada prompt em poucos minutos.
+              </p>
+              
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => {
+                    setShowInitialPopup(false);
+                    setTimeout(() => {
+                      document.getElementById('tutoriais')?.scrollIntoView({ behavior: 'smooth' });
+                    }, 100);
+                  }}
+                  className="w-full py-3.5 rounded-xl bg-yellow-500 text-black font-bold flex items-center justify-center gap-2 hover:bg-yellow-400 transition-colors shadow-[0_0_20px_-5px_rgba(234,179,8,0.4)]"
+                >
+                  <Play className="w-4 h-4 fill-black" /> Assistir
+                </button>
+                <button 
+                  onClick={() => setShowInitialPopup(false)}
+                  className="w-full py-3.5 rounded-xl bg-white/5 border border-white/10 text-white font-semibold hover:bg-white/10 transition-colors"
+                >
+                  Pular
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
