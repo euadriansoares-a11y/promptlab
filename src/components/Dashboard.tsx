@@ -1,8 +1,39 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { CATEGORIES } from '../data';
-import { Copy, Check, Sparkles, LogOut, Terminal, Heart, ChevronRight, Zap, Play, X } from 'lucide-react';
+import { Copy, Check, Sparkles, LogOut, Terminal, Heart, ChevronRight, Zap, Play, X, Bell, Users, LayoutGrid } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import UpdatesTab from './UpdatesTab';
+import CommunityTab from './CommunityTab';
+import TutoriaisTab from './TutoriaisTab';
+
+const Confetti = ({ active, x, y }: { active: boolean, x: number, y: number }) => {
+  if (!active) return null;
+  return (
+    <div 
+      className="absolute pointer-events-none z-50 flex items-center justify-center"
+      style={{ left: x, top: y, width: 0, height: 0 }}
+    >
+      {[...Array(6)].map((_, i) => (
+        <motion.div
+          key={i}
+          initial={{ opacity: 1, scale: 0, x: 0, y: 0 }}
+          animate={{ 
+            opacity: 0, 
+            scale: [0, 1.5, 0], 
+            x: (Math.random() - 0.5) * 100, 
+            y: (Math.random() - 0.5) * 100 - 50,
+            rotate: Math.random() * 360
+          }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="absolute w-2 h-2 text-red-500 fill-red-500"
+        >
+           <Heart className="w-full h-full fill-current" />
+        </motion.div>
+      ))}
+    </div>
+  );
+};
 
 const VerifiedBadge = () => (
   <svg className="w-3.5 h-3.5 text-[#0095f6] fill-current shrink-0 inline-block ml-1 align-middle" viewBox="0 0 24 24">
@@ -14,6 +45,7 @@ export default function Dashboard() {
   const [prompts, setPrompts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState("Todos");
+  const [currentView, setCurrentView] = useState<'biblioteca' | 'atualizacoes' | 'comunidade' | 'tutoriais'>('biblioteca');
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [activeSlides, setActiveSlides] = useState<{ [id: number]: number }>({});
   const [likedIds, setLikedIds] = useState<number[]>([]);
@@ -99,7 +131,7 @@ export default function Dashboard() {
          </div>
          <div className="flex items-center gap-4 md:gap-6">
            <button 
-             onClick={() => document.getElementById('tutoriais')?.scrollIntoView({ behavior: 'smooth' })}
+             onClick={() => setCurrentView('tutoriais')}
              className="inline-flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-xl bg-white/5 border border-white/10 text-xs md:text-sm text-white font-semibold hover:bg-white/10 transition-colors"
            >
              <Play className="w-3.5 h-3.5 md:w-4 md:h-4 text-yellow-500 fill-yellow-500" />
@@ -115,8 +147,64 @@ export default function Dashboard() {
          </div>
       </header>
 
-      <main className="w-full max-w-7xl mx-auto px-4 md:px-6 py-12 relative z-10 flex flex-col items-center text-center">
-        {/* Intro */}
+      {/* Main Navigation */}
+      <nav className="w-full border-b border-gray-900/50 bg-black/50 backdrop-blur-xl sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 flex items-center gap-8 text-sm overflow-x-auto no-scrollbar">
+           <button
+             onClick={() => setCurrentView('biblioteca')}
+             className={`flex items-center gap-2 py-4 border-b-2 font-bold whitespace-nowrap transition-colors ${
+               currentView === 'biblioteca' 
+                 ? 'border-yellow-500 text-yellow-500' 
+                 : 'border-transparent text-gray-400 hover:text-white'
+             }`}
+           >
+             <LayoutGrid className="w-4 h-4" />
+             <span className="tracking-wide uppercase text-xs mt-0.5">Biblioteca</span>
+           </button>
+
+           <button
+             onClick={() => setCurrentView('atualizacoes')}
+             className={`flex items-center gap-2 py-4 border-b-2 font-bold whitespace-nowrap transition-colors ${
+               currentView === 'atualizacoes' 
+                 ? 'border-yellow-500 text-yellow-500' 
+                 : 'border-transparent text-gray-400 hover:text-white'
+             }`}
+           >
+             <Bell className="w-4 h-4" />
+             <span className="tracking-wide uppercase text-xs mt-0.5">Atualizações</span>
+             <span className="ml-1 bg-yellow-500 text-black text-[10px] px-1.5 py-0.5 rounded-full font-black animate-pulse">NOVO</span>
+           </button>
+
+           <button
+             onClick={() => setCurrentView('comunidade')}
+             className={`flex items-center gap-2 py-4 border-b-2 font-bold whitespace-nowrap transition-colors ${
+               currentView === 'comunidade' 
+                 ? 'border-yellow-500 text-yellow-500' 
+                 : 'border-transparent text-gray-400 hover:text-white'
+             }`}
+           >
+             <Users className="w-4 h-4" />
+             <span className="tracking-wide uppercase text-xs mt-0.5">Comunidade</span>
+           </button>
+
+           <button
+             onClick={() => setCurrentView('tutoriais')}
+             className={`flex items-center gap-2 py-4 border-b-2 font-bold whitespace-nowrap transition-colors ${
+               currentView === 'tutoriais' 
+                 ? 'border-yellow-500 text-yellow-500' 
+                 : 'border-transparent text-gray-400 hover:text-white'
+             }`}
+           >
+             <Play className="w-4 h-4" />
+             <span className="tracking-wide uppercase text-xs mt-0.5">Tutoriais</span>
+           </button>
+        </div>
+      </nav>
+
+      <main className="w-full max-w-7xl mx-auto px-4 md:px-6 py-12 relative z-10 flex flex-col items-center text-center pb-24 md:pb-12">
+        {currentView === 'biblioteca' && (
+          <>
+            {/* Intro */}
         <motion.div
            initial={{ opacity: 0, y: 20 }}
            animate={{ opacity: 1, y: 0 }}
@@ -293,58 +381,13 @@ export default function Dashboard() {
             );
           })}
         </div>
+      </>
+      )}
 
-        {/* Tutorial Section (Bottom) */}
-        <div id="tutoriais" className="w-full max-w-5xl border border-neutral-900 bg-[#0c0c0e] rounded-3xl p-6 md:p-10 flex flex-col items-center gap-8 md:gap-12 mt-4 mb-20 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-yellow-500/5 blur-[100px] rounded-full pointer-events-none" />
-          
-          <div className="text-center z-10 w-full max-w-2xl">
-            <h2 className="text-white font-[Space_Grotesk] font-extrabold text-2xl md:text-3xl mb-4 flex items-center justify-center gap-3">
-              <span className="p-3 bg-yellow-500/10 rounded-full border border-yellow-500/20 text-yellow-500">
-                <Play className="w-6 h-6 fill-yellow-500" />
-              </span>
-              Aprenda na Prática
-            </h2>
-            <p className="text-gray-400 text-sm md:text-base font-medium leading-relaxed">
-              Ainda com dúvidas? Assista aos nossos tutoriais rápidos de como extrair todo o potencial de cada prompt no seu dia a dia.
-            </p>
-          </div>
-
-          <div className="flex flex-col md:flex-row items-center justify-center gap-8 w-full z-10">
-            {/* Tutorial 1 */}
-            <div className="w-full max-w-[280px] md:max-w-[300px] flex flex-col gap-3 group">
-              <div className="w-full aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-neutral-800 shadow-2xl relative">
-                  <iframe 
-                    src="https://player.vimeo.com/video/1195755424?title=0&amp;byline=0&amp;portrait=0&amp;badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479" 
-                    frameBorder="0" 
-                    allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share" 
-                    referrerPolicy="strict-origin-when-cross-origin" 
-                    className="w-full h-full absolute inset-0"
-                    title="1 PASSO: Conecte o Claude no seu instagram"
-                    allowFullScreen
-                  ></iframe>
-              </div>
-              <h3 className="text-white text-center font-[Space_Grotesk] font-bold text-sm md:text-base">1 PASSO: Conecte o Claude no seu instagram</h3>
-            </div>
-
-            {/* Tutorial 2 */}
-            <div className="w-full max-w-[280px] md:max-w-[300px] flex flex-col gap-3 group">
-              <div className="w-full aspect-[9/16] bg-black rounded-2xl overflow-hidden border border-neutral-800 shadow-2xl relative">
-                  <iframe 
-                    src="https://player.vimeo.com/video/1195756442?title=0&amp;byline=0&amp;portrait=0&amp;badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479" 
-                    frameBorder="0" 
-                    allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share" 
-                    referrerPolicy="strict-origin-when-cross-origin" 
-                    className="w-full h-full absolute inset-0"
-                    title="2 PASSO: Aprenda a usar a biblioteca de prompts"
-                    allowFullScreen
-                  ></iframe>
-              </div>
-              <h3 className="text-white text-center font-[Space_Grotesk] font-bold text-sm md:text-base">2 PASSO: Aprenda a usar a biblioteca de prompts</h3>
-            </div>
-          </div>
-        </div>
-      </main>
+      {currentView === 'atualizacoes' && <UpdatesTab />}
+      {currentView === 'comunidade' && <CommunityTab />}
+      {currentView === 'tutoriais' && <TutoriaisTab />}
+    </main>
 
       {/* Initial Tutorial Popup Modal */}
       <AnimatePresence>
@@ -382,7 +425,7 @@ export default function Dashboard() {
                   onClick={() => {
                     setShowInitialPopup(false);
                     setTimeout(() => {
-                      document.getElementById('tutoriais')?.scrollIntoView({ behavior: 'smooth' });
+                      setCurrentView('tutoriais');
                     }, 100);
                   }}
                   className="w-full py-3.5 rounded-xl bg-yellow-500 text-black font-bold flex items-center justify-center gap-2 hover:bg-yellow-400 transition-colors shadow-[0_0_20px_-5px_rgba(234,179,8,0.4)]"
