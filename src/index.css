@@ -11,3 +11,13 @@
     @apply bg-black text-gray-100 antialiased selection:bg-fuchsia-500/30 selection:text-fuchsia-200;
   }
 }
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

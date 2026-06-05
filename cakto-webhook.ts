@@ -45,31 +45,40 @@ export async function webhookCakto(req: any, res: any) {
     const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
     if (listError) throw listError;
 
-    const existingUser = usersData.users.find(u => u.email === email);
+    const existingUser = usersData.users.find((u: any) => u.email === email);
     let userId = existingUser?.id;
 
     if (!existingUser) {
-      // Criar novo usuário e enviar um convite (Invite) por e-mail automaticamente pelo Supabase.
-      // O Supabase enviará um link para o cliente criar a própria senha e acessar a plataforma.
-      const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
-        data: { full_name: name, phone: phone }
+      // Criar novo usuário com email_confirm: true e senha temporária
+      const { data: inviteData, error: inviteError } = await supabase.auth.admin.createUser({
+        email: email,
+        password: "aluno123",
+        email_confirm: true,
+        user_metadata: { full_name: name, phone: phone }
       });
 
-      if (inviteError) throw inviteError;
+      if (inviteError) {
+        console.error("[CAKTO WEBHOOK] Erro ao criar usuário:", inviteError);
+        // Retornar 200 para evitar retentativas infinitas da Cakto
+        return res.status(200).json({ error: "Erro ao criar usuário, mas evento processado." });
+      }
       userId = inviteData.user?.id;
 
-      console.log(`[INFO] Convite enviado para o novo usuário. E-mail: ${email}`);
+      console.log(`[INFO] Novo usuário criado. E-mail: ${email}`);
+    } else {
+      console.log(`[INFO] Usuário já existente encontrado. E-mail: ${email}`);
     }
 
     if (!userId) throw new Error("Não foi possível resolver o ID do usuário.");
 
-    // 5. Upsert na tabela de perfis
-    const { error: perfilError } = await supabase.from("perfis").upsert({
+    // 5. Upsert na tabela de profiles
+    const { error: perfilError } = await supabase.from("profiles").upsert({
       id: userId,
       nome: name,
       email: email,
       telefone: phone,
-      acesso_ativo: true
+      acesso_ativo: true,
+      must_change_password: true
     });
 
     if (perfilError) throw perfilError;

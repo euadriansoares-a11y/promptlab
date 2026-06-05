@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Terminal, Lock, Mail, Key } from 'lucide-react';
+import { Terminal, Lock, Mail, Key, MessageCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,25 +14,23 @@ export default function Login() {
     setLoading(true);
     setError(null);
     try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
-        else setError('Verifique seu e-mail para confirmar o cadastro.');
-      }
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) throw error;
     } catch (err: any) {
       setError(err.message || 'Ocorreu um erro.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleWhatsApp = () => {
+    // Substitua o número abaixo pelo seu número de WhatsApp com DDI e DDD (ex: 5511999999999)
+    const numeroUrl = "5511999999999";
+    const mensagem = encodeURIComponent("Olá, estou com problemas para entrar na minha conta e preciso de acesso.");
+    window.open(`https://wa.me/${numeroUrl}?text=${mensagem}`, '_blank');
   };
 
   return (
@@ -98,17 +95,18 @@ export default function Login() {
             disabled={loading}
             className="w-full mt-4 bg-gradient-to-r from-yellow-500 to-amber-600 text-black font-bold rounded-xl py-3.5 text-sm uppercase tracking-wider hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center"
           >
-            {loading ? 'Aguarde...' : isLogin ? 'Entrar na Biblioteca' : 'Criar Conta'}
+            {loading ? 'Aguarde...' : 'Entrar na Biblioteca'}
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-8 pt-6 border-t border-neutral-800/50 text-center">
           <button 
             type="button"
-            onClick={() => setIsLogin(!isLogin)}
-            className="text-xs text-gray-500 hover:text-yellow-500 transition-colors"
+            onClick={handleWhatsApp}
+            className="flex items-center justify-center gap-2 mx-auto w-full py-3 rounded-xl border border-[#25D366]/30 bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366]/20 transition-colors text-xs font-semibold uppercase tracking-wider"
           >
-            {isLogin ? "Ainda não tem acesso? Crie uma conta." : "Já tem conta? Clique para entrar."}
+            <MessageCircle className="w-4 h-4" />
+            Estou com problemas para entrar na minha conta
           </button>
         </div>
       </motion.div>

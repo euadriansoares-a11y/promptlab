@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { CATEGORIES } from '../data';
-import { Copy, Check, Sparkles, LogOut, Terminal, Heart, ChevronRight, Zap, Play, X, Bell, Users, LayoutGrid } from 'lucide-react';
+import { Copy, Check, Sparkles, LogOut, Terminal, Heart, ChevronRight, Zap, Play, X, Bell, Users, LayoutGrid, UserCircle, Star, Network } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import EstrategiasTab from './EstrategiasTab';
+import ConectoresTab from './ConectoresTab';
 import UpdatesTab from './UpdatesTab';
 import CommunityTab from './CommunityTab';
 import TutoriaisTab from './TutoriaisTab';
+import ProfileTab from './ProfileTab';
+import ForcePasswordChange from './ForcePasswordChange';
+import UpsellTab from './UpsellTab';
 
 const Confetti = ({ active, x, y }: { active: boolean, x: number, y: number }) => {
   if (!active) return null;
@@ -45,35 +50,48 @@ export default function Dashboard() {
   const [prompts, setPrompts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState("Todos");
-  const [currentView, setCurrentView] = useState<'biblioteca' | 'atualizacoes' | 'comunidade' | 'tutoriais'>('biblioteca');
+  const [currentView, setCurrentView] = useState<'biblioteca' | 'estrategias' | 'conectores' | 'atualizacoes' | 'comunidade' | 'tutoriais' | 'perfil' | 'upsell'>('biblioteca');
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [activeSlides, setActiveSlides] = useState<{ [id: number]: number }>({});
   const [likedIds, setLikedIds] = useState<number[]>([]);
   const [doubleClickedId, setDoubleClickedId] = useState<number | null>(null);
   const [playingTutorials, setPlayingTutorials] = useState<{ [id: string]: boolean }>({});
   const [showInitialPopup, setShowInitialPopup] = useState(true);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   useEffect(() => {
-    async function fetchPrompts() {
+    async function checkPasswordAndFetchPrompts() {
       if (!supabase) return;
+      
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('must_change_password')
+            .eq('id', user.id)
+            .single();
+
+          if (profile && profile.must_change_password) {
+            setMustChangePassword(true);
+            setIsLoading(false);
+            return;
+          }
+        }
+
         const { data, error } = await supabase
           .from('prompts')
           .select('*')
           .order('id', { ascending: true });
         
-        if (error) {
-          console.error("Erro ao carregar prompts:", error);
-        } else if (data) {
-          setPrompts(data);
-        }
+        if (data) setPrompts(data);
       } catch (err) {
-        console.error("Erro de exceção ao carregar prompts:", err);
+        console.error("Erro ao iniciar painel:", err);
       } finally {
         setIsLoading(false);
       }
     }
-    fetchPrompts();
+    checkPasswordAndFetchPrompts();
   }, []);
 
   const handleSignOut = async () => {
@@ -111,6 +129,19 @@ export default function Dashboard() {
     }, 1000);
   };
 
+  if (mustChangePassword) {
+    return (
+      <ForcePasswordChange 
+        onComplete={() => {
+          setMustChangePassword(false);
+          // Recarregar os prompts após fechar o modal, pois não foram carregados
+          supabase.from('prompts').select('*').order('id', { ascending: true })
+            .then(({ data }) => data && setPrompts(data));
+        }} 
+      />
+    );
+  }
+
   const filteredPrompts = selectedCategory === "Todos" 
     ? prompts 
     : prompts.filter(p => p.category === selectedCategory);
@@ -130,6 +161,13 @@ export default function Dashboard() {
            </span>
          </div>
          <div className="flex items-center gap-4 md:gap-6">
+           <button 
+             onClick={() => setCurrentView('perfil')}
+             className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 text-sm"
+           >
+             <UserCircle className="w-5 h-5" />
+             <span className="hidden md:inline">Perfil</span>
+           </button>
            <button 
              onClick={() => setCurrentView('tutoriais')}
              className="inline-flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 rounded-xl bg-white/5 border border-white/10 text-xs md:text-sm text-white font-semibold hover:bg-white/10 transition-colors"
@@ -160,6 +198,30 @@ export default function Dashboard() {
            >
              <LayoutGrid className="w-4 h-4" />
              <span className="tracking-wide uppercase text-xs mt-0.5">Biblioteca</span>
+           </button>
+
+           <button
+             onClick={() => setCurrentView('estrategias')}
+             className={`flex items-center gap-2 py-4 border-b-2 font-bold whitespace-nowrap transition-colors ${
+               currentView === 'estrategias' 
+                 ? 'border-yellow-500 text-yellow-500' 
+                 : 'border-transparent text-gray-400 hover:text-white'
+             }`}
+           >
+             <Zap className="w-4 h-4" />
+             <span className="tracking-wide uppercase text-xs mt-0.5">Estratégias</span>
+           </button>
+
+           <button
+             onClick={() => setCurrentView('conectores')}
+             className={`flex items-center gap-2 py-4 border-b-2 font-bold whitespace-nowrap transition-colors ${
+               currentView === 'conectores' 
+                 ? 'border-yellow-500 text-yellow-500' 
+                 : 'border-transparent text-gray-400 hover:text-white'
+             }`}
+           >
+             <Network className="w-4 h-4" />
+             <span className="tracking-wide uppercase text-xs mt-0.5">Conectores</span>
            </button>
 
            <button
@@ -197,6 +259,18 @@ export default function Dashboard() {
            >
              <Play className="w-4 h-4" />
              <span className="tracking-wide uppercase text-xs mt-0.5">Tutoriais</span>
+           </button>
+
+           <button
+             onClick={() => setCurrentView('upsell')}
+             className={`flex items-center gap-2 py-4 border-b-2 font-bold whitespace-nowrap transition-colors ${
+               currentView === 'upsell' 
+                 ? 'border-yellow-500 text-yellow-500' 
+                 : 'border-transparent text-gray-400 hover:text-white'
+             }`}
+           >
+             <Star className="w-4 h-4" />
+             <span className="tracking-wide uppercase text-xs mt-0.5">Conteúdos Extras</span>
            </button>
         </div>
       </nav>
@@ -384,9 +458,13 @@ export default function Dashboard() {
       </>
       )}
 
+      {currentView === 'estrategias' && <EstrategiasTab />}
+      {currentView === 'conectores' && <ConectoresTab />}
       {currentView === 'atualizacoes' && <UpdatesTab />}
       {currentView === 'comunidade' && <CommunityTab />}
       {currentView === 'tutoriais' && <TutoriaisTab />}
+      {currentView === 'perfil' && <ProfileTab />}
+      {currentView === 'upsell' && <UpsellTab />}
     </main>
 
       {/* Initial Tutorial Popup Modal */}
@@ -397,46 +475,54 @@ export default function Dashboard() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/85 backdrop-blur-[6px]"
               onClick={() => setShowInitialPopup(false)}
             />
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-sm bg-[#0c0c0e] border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl z-10 flex flex-col p-6 text-center isolate"
+              className="relative w-full max-w-[520px] bg-[#131313] border border-white/10 rounded-[20px] overflow-hidden shadow-2xl z-10 flex flex-col p-8 isolate text-left"
             >
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-yellow-500/10 blur-[50px] rounded-full pointer-events-none -z-10" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-yellow-500/5 blur-[80px] rounded-full pointer-events-none -z-10" />
               
-              <div className="w-16 h-16 rounded-full bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mx-auto mb-4">
-                <Play className="w-8 h-8 text-yellow-500 fill-yellow-500 ml-1" />
+              <div className="inline-flex items-center gap-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-full px-3 py-1 text-[11px] font-semibold text-yellow-500 tracking-wider uppercase mb-5 w-fit">
+                ⚡ Bem-vindo à Biblioteca
               </div>
               
-              <h3 className="text-white font-[Space_Grotesk] font-bold text-2xl mb-2">
-                Assista o tutorial agora
+              <h3 className="text-white font-[Space_Grotesk] font-bold text-4xl leading-[1.1] tracking-wide mb-2">
+                Sua central de<br /><span className="text-yellow-500">prompts de elite</span>
               </h3>
               
-              <p className="text-gray-400 text-sm mb-8">
-                Descubra como extrair o máximo de cada prompt em poucos minutos.
+              <p className="text-gray-400 text-sm leading-relaxed mb-6">
+                Aqui você encontra prompts prontos para copiar e usar em qualquer IA — organizados por objetivo, plataforma e ferramenta.
               </p>
               
-              <div className="flex flex-col gap-3">
+              <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 mb-6 flex gap-3 items-start">
+                <div className="text-xl shrink-0 mt-0.5">🗺️</div>
+                <div className="text-[13px] text-gray-400 leading-relaxed">
+                  <strong className="text-yellow-500">Novo por aqui? Comece pelas Estratégias.</strong><br />
+                  Na aba <strong>Estratégias</strong> você encontra jornadas passo a passo que combinam múltiplos prompts para atingir um objetivo real — como ganhar seguidores, criar funis ou vender no direct. É o melhor ponto de partida.
+                </div>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-2.5">
                 <button 
                   onClick={() => {
                     setShowInitialPopup(false);
                     setTimeout(() => {
-                      setCurrentView('tutoriais');
+                      setCurrentView('estrategias');
                     }, 100);
                   }}
-                  className="w-full py-3.5 rounded-xl bg-yellow-500 text-black font-bold flex items-center justify-center gap-2 hover:bg-yellow-400 transition-colors shadow-[0_0_20px_-5px_rgba(234,179,8,0.4)]"
+                  className="flex-1 py-3 px-6 rounded-full bg-yellow-500 text-black font-bold flex items-center justify-center gap-2 hover:bg-yellow-400 transition-all tracking-wide text-[13px] shadow-[0_0_20px_-5px_rgba(234,179,8,0.3)]"
                 >
-                  <Play className="w-4 h-4 fill-black" /> Assistir
+                  🗺️ Ver Estratégias primeiro
                 </button>
                 <button 
                   onClick={() => setShowInitialPopup(false)}
-                  className="w-full py-3.5 rounded-xl bg-white/5 border border-white/10 text-white font-semibold hover:bg-white/10 transition-colors"
+                  className="py-3 px-5 rounded-full bg-transparent border border-white/10 text-gray-400 font-medium hover:border-white/30 hover:text-white transition-colors text-[13px]"
                 >
-                  Pular
+                  Explorar biblioteca
                 </button>
               </div>
             </motion.div>
