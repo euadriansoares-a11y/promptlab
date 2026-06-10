@@ -99,14 +99,14 @@ export default function Login() {
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-neutral-800/50 text-center">
+        <div className="mt-6 pt-6 border-t border-neutral-800/50 flex flex-col items-center">
           <button 
             type="button"
             onClick={handleWhatsApp}
-            className="flex items-center justify-center gap-2 mx-auto w-full py-3 rounded-xl border border-[#25D366]/30 bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366]/20 transition-colors text-xs font-semibold uppercase tracking-wider"
+            className="group flex items-center justify-center gap-2 text-xs font-medium text-neutral-500 hover:text-white transition-colors"
           >
-            <MessageCircle className="w-4 h-4" />
-            Estou com problemas para entrar na minha conta
+            <MessageCircle className="w-4 h-4 text-neutral-600 group-hover:text-emerald-500 transition-colors" />
+            <span>Problemas para acessar? <span className="underline decoration-neutral-800 underline-offset-4 group-hover:decoration-emerald-500/50 transition-colors">Fale com o suporte</span></span>
           </button>
         </div>
       </motion.div>
