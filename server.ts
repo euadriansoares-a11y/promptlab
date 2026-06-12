@@ -12,6 +12,7 @@ async function startServer() {
 
   // Use JSON middleware para processar o body do webhook
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
   // Rota do Webhook da Cakto
   app.post("/webhook/cakto", webhookCakto);

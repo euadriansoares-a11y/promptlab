@@ -9,13 +9,19 @@ let supabaseClient: any = null;
 function getSupabaseClient() {
   if (supabaseClient) return supabaseClient;
 
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  let url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
   if (!url || !serviceRoleKey) {
     throw new Error(
       "Credenciais do Supabase não configuradas no servidor! Verifique se SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY estão definidas nas configurações do seu projeto."
     );
+  }
+
+  // Remove o sufixo /rest/v1 e barras sobressalentes para evitar "Invalid path specified in request URL"
+  url = url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '').trim();
+  if (url && !url.startsWith('http')) {
+    url = `https://${url}`;
   }
 
   supabaseClient = createClient(url, serviceRoleKey, {
@@ -26,6 +32,59 @@ function getSupabaseClient() {
   });
 
   return supabaseClient;
+}
+
+// 4. Helper robusto para buscar usuário por e-mail (Case-Insensitive)
+async function findUserByEmail(supabase: any, email: string): Promise<string | null> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  // 4a. Busca direta na tabela de perfis (profiles) usando ilike (case-insensitive)
+  try {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("id")
+      .ilike("email", cleanEmail)
+      .maybeSingle();
+    
+    if (profile?.id) {
+      console.log(`[CAKTO WEBHOOK] Aluno localizado na tabela de perfis (profiles): ${profile.id}`);
+      return profile.id;
+    }
+  } catch (err) {
+    console.error("[CAKTO WEBHOOK] Erro ao pesquisar na tabela de perfis:", err);
+  }
+
+  // 4b. Busca nativa no Auth do Supabase por e-mail
+  try {
+    const { data, error } = await supabase.auth.admin.getUserByEmail(cleanEmail);
+    if (!error && data?.user?.id) {
+      console.log(`[CAKTO WEBHOOK] Aluno localizado nativamente no Auth (getUserByEmail): ${data.user.id}`);
+      return data.user.id;
+    }
+  } catch (err) {
+    console.warn("[CAKTO WEBHOOK] Método getUserByEmail não disponível ou falhou:", err);
+  }
+
+  // 4c. Varredura global no Auth (listUsers) com comparação case-insensitive
+  try {
+    const { data: usersData, error: listError } = await supabase.auth.admin.listUsers({
+      perPage: 1000
+    });
+    if (!listError && usersData?.users) {
+      const foundUser = usersData.users.find(
+        (u: any) => (u.email || "").trim().toLowerCase() === cleanEmail
+      );
+      if (foundUser?.id) {
+        console.log(`[CAKTO WEBHOOK] Aluno localizado na listagem global do Auth: ${foundUser.id}`);
+        return foundUser.id;
+      }
+    }
+  } catch (err) {
+    console.error("[CAKTO WEBHOOK] Erro ao listar usuários globais:", err);
+  }
+
+  return null;
 }
 
 export async function webhookCakto(req: any, res: any) {
@@ -46,7 +105,7 @@ export async function webhookCakto(req: any, res: any) {
       console.warn("[CAKTO WEBHOOK] CAKTO_WEBHOOK_SECRET não está configurado nas variáveis de ambiente. Lógica de segurança de secret ignorada.");
     }
 
-    // 2. Verificar se o evento é purchase_approved de forma ultra robusta
+    // 2. Verificar se o evento é de aprovação de compra (robustez ultra-elevada)
     const eventName = (payload?.event || payload?.event_name || "").toLowerCase();
     const statusName = (payload?.status || payload?.data?.status || "").toLowerCase();
     
@@ -61,7 +120,6 @@ export async function webhookCakto(req: any, res: any) {
       statusName === "paid" ||
       statusName === "completed" ||
       statusName === "success" ||
-      // Se for um teste da Cakto ou n8n que use payload customizado, assumimos como aprovado para cadastrar o aluno
       payload?.test === true || 
       payload?.is_test === true ||
       payload?.status === "aprovado";
@@ -77,54 +135,32 @@ export async function webhookCakto(req: any, res: any) {
     const productObj = dataObj?.product || payload?.product || {};
 
     const name = customerObj?.name || dataObj?.customer_name || dataObj?.name || payload?.customer_name || payload?.name || "Cliente";
-    const email = customerObj?.email || dataObj?.customer_email || dataObj?.email || payload?.customer_email || payload?.email;
+    const rawEmail = customerObj?.email || dataObj?.customer_email || dataObj?.email || payload?.customer_email || payload?.email;
     const phone = customerObj?.phone || dataObj?.customer_phone || dataObj?.phone || payload?.customer_phone || payload?.phone || "";
 
+    if (!rawEmail) {
+      console.error("[CAKTO WEBHOOK] Erro: Email do cliente ausente no payload:", JSON.stringify(payload));
+      return res.status(400).json({ error: "Email do cliente ausente" });
+    }
+
+    const email = rawEmail.trim().toLowerCase();
     const produto = productObj?.name || dataObj?.product_name || dataObj?.product || payload?.product_name || payload?.product || "Biblioteca de Prompts";
     const valor = dataObj?.amount || dataObj?.price || payload?.amount || payload?.price || 0;
     const metodoPagamento = dataObj?.paymentMethod || dataObj?.payment_method || payload?.paymentMethod || payload?.payment_method || "não especificado";
     const cakto_order_id = dataObj?.id || dataObj?.order_id || payload?.id || payload?.order_id || `cakto_${Date.now()}`;
 
-    if (!email) {
-      console.error("[CAKTO WEBHOOK] Erro: Email do cliente ausente no payload:", JSON.stringify(payload));
-      return res.status(400).json({ error: "Email do cliente ausente" });
-    }
-
     console.log(`[CAKTO WEBHOOK] Processando liberação para: ${email} | Nome: ${name}`);
 
-    // Obter cliente administrativo do Supabase
+    // Obter cliente administrativo configurado e corrigido do Supabase
     const supabase = getSupabaseClient();
 
-    // 4. Verificar se o usuário já existe na tabela profiles primeiro (muito mais rápido, evita estouro do listUsers)
-    const { data: perfilExistente, error: perfilError } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle();
+    // 4. Buscar se o usuário já existe na base de dados
+    let userId = await findUserByEmail(supabase, email);
 
-    let userId = perfilExistente?.id;
-
-    if (!userId) {
-      console.log(`[CAKTO WEBHOOK] Perfil não localizado pelo e-mail '${email}'. Verificando listagem global do Auth...`);
-      
-      // Busca geral no Auth pra ter certeza que não há usuário duplicado
-      const { data: usersData, error: listError } = await supabase.auth.admin.listUsers({
-        perPage: 1000
-      });
-      
-      if (!listError && usersData?.users) {
-        const existingUser = usersData.users.find((u: any) => u.email === email);
-        if (existingUser) {
-          userId = existingUser.id;
-          console.log(`[CAKTO WEBHOOK] Usuário encontrado apenas na autenticação (Auth). ID: ${userId}`);
-        }
-      }
-    }
-
-    // Se o usuário realmente não existe, vamos criá-lo
+    // Se o usuário realmente não existe em lugar nenhum, vamos criá-lo no Auth
     if (!userId) {
       const defaultPassword = process.env.DEFAULT_PASSWORD || "CodigoIA@2024";
-      console.log(`[CAKTO WEBHOOK] Usuário novo. Criando no Auth com email ${email} e senha ${defaultPassword}`);
+      console.log(`[CAKTO WEBHOOK] Aluno novo detectado. Criando conta de acesso com e-mail ${email}`);
       
       const { data: inviteData, error: inviteError } = await supabase.auth.admin.createUser({
         email: email,
@@ -134,31 +170,30 @@ export async function webhookCakto(req: any, res: any) {
       });
 
       if (inviteError) {
-        // Se der erro de duplicate de forma concorrente, tenta carregar o id de novo
-        if (inviteError.message.includes("already exists") || inviteError.status === 422) {
-          const { data: retryUsers } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-          const retryFound = retryUsers?.users?.find((u: any) => u.email === email);
-          if (retryFound) {
-            userId = retryFound.id;
-          }
-        }
+        console.warn("[CAKTO WEBHOOK] Erro ao tentar criar usuário via Admin API, tentando buscar se já existe:", inviteError.message);
+        
+        // Verifica novamente se já existia (ex: corrida de concorrência ou criação paralela)
+        userId = await findUserByEmail(supabase, email);
         
         if (!userId) {
-          console.error("[CAKTO WEBHOOK] Erro ao criar usuário no Auth do Supabase:", inviteError);
-          return res.status(200).json({ error: "Erro ao criar usuário, mas evento registrado como recebido." });
+          console.error("[CAKTO WEBHOOK] Falha crítica de persistência. Erro original do Supabase:", inviteError);
+          // Retornar 500 para permitir que a Cakto reenvie o webhook em caso de instabilidade
+          return res.status(500).json({ error: "Erro crítico ao criar conta de usuário", details: inviteError.message });
         }
       } else {
         userId = inviteData.user?.id;
-        console.log(`[CAKTO WEBHOOK] Novo usuário do Auth criado com sucesso. ID: ${userId}`);
+        console.log(`[CAKTO WEBHOOK] Nova conta de usuário gerada com sucesso no Auth. ID: ${userId}`);
       }
     } else {
-      console.log(`[CAKTO WEBHOOK] Usuário já existente encontrado. ID: ${userId}`);
+      console.log(`[CAKTO WEBHOOK] Usuário encontrado. ID associado: ${userId}`);
     }
 
-    if (!userId) throw new Error("Não foi possível resolver o ID do usuário.");
+    if (!userId) {
+      return res.status(500).json({ error: "Não foi possível resolver o identificador único do aluno." });
+    }
 
-    // 5. Upsert na tabela de profiles para manter atualizado e forçar redefinição opcional de senha
-    console.log(`[CAKTO WEBHOOK] Fazendo upsert na tabela de profiles para o ID ${userId}`);
+    // 5. Garantir Upsert do perfil do aluno (na tabela 'profiles')
+    console.log(`[CAKTO WEBHOOK] Atualizando perfil na tabela 'profiles' para o ID: ${userId}`);
     const { error: upsertPerfilError } = await supabase.from("profiles").upsert({
       id: userId,
       nome: name,
@@ -169,12 +204,12 @@ export async function webhookCakto(req: any, res: any) {
     });
 
     if (upsertPerfilError) {
-      console.error("[CAKTO WEBHOOK] Erro no upsert da tabela 'profiles':", upsertPerfilError);
-      throw upsertPerfilError;
+      console.error("[CAKTO WEBHOOK] Erro no upsert do perfil na tabela 'profiles':", upsertPerfilError);
+      return res.status(500).json({ error: "Erro ao salvar perfil do aluno no banco de dados", details: upsertPerfilError.message });
     }
 
-    // 6. Inserir na tabela de compras de forma segura
-    console.log(`[CAKTO WEBHOOK] Cadastrando compra na tabela 'compras'...`);
+    // 6. Registrar a transação de compra na tabela 'compras'
+    console.log(`[CAKTO WEBHOOK] Cadastrando compra da ordem de ID: ${cakto_order_id}`);
     const { error: compraError } = await supabase.from("compras").insert({
       user_id: userId,
       produto_nome: produto,
@@ -185,14 +220,14 @@ export async function webhookCakto(req: any, res: any) {
 
     if (compraError) {
       if (compraError.code === '23505') { 
-        console.log(`[CAKTO WEBHOOK] Compra com ID do pedido ${cakto_order_id} já havia sido registrada. Ignorando.`);
+        console.log(`[CAKTO WEBHOOK] Compra de ID ${cakto_order_id} já cadastrada anteriormente. Transação duplicada ignorada com sucesso.`);
       } else {
-        console.error("[CAKTO WEBHOOK] Erro ao salvar compra no banco:", compraError);
-        throw compraError;
+        console.error("[CAKTO WEBHOOK] Erro no registro da compra:", compraError);
+        return res.status(500).json({ error: "Erro ao salvar compras no banco de dados", details: compraError.message });
       }
     }
 
-    console.log(`[CAKTO WEBHOOK] Sucesso absoluto! Acesso liberado no Supabase para ${email}`);
+    console.log(`[CAKTO WEBHOOK] Sucesso absoluto! Acesso e compra processados com sucesso para: ${email}`);
     return res.status(200).json({ success: true, message: "Acesso e compra liberados com sucesso!" });
 
   } catch (err: any) {
