@@ -1,244 +1,273 @@
-import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
-import dotenv from "dotenv";
-dotenv.config();
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { Request, Response } from 'express';
 
-// Inicialização Preguiçosa (Lazy Initialization)
-let supabaseClient: any = null;
+// ----------------------------------------------------------------
+// Supabase client (service role — nunca expor no frontend)
+// ----------------------------------------------------------------
+let _supabase: SupabaseClient | null = null;
 
-function getSupabaseClient() {
-  if (supabaseClient) return supabaseClient;
+function getSupabase(): SupabaseClient {
+  if (_supabase) return _supabase;
 
-  let url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  let url = (process.env.SUPABASE_URL ?? '').trim()
+    .replace(/\/rest\/v1\/?$/, '')
+    .replace(/\/$/, '');
 
-  if (!url || !serviceRoleKey) {
-    throw new Error(
-      "Credenciais do Supabase não configuradas no servidor! Verifique se SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY estão definidas nas configurações do seu projeto."
-    );
+  if (url && !url.startsWith('http')) url = `https://${url}`;
+
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
+
+  if (!url || !key) {
+    throw new Error('SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados.');
   }
 
-  // Remove o sufixo /rest/v1 e barras sobressalentes para evitar "Invalid path specified in request URL"
-  url = url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '').trim();
-  if (url && !url.startsWith('http')) {
-    url = `https://${url}`;
-  }
-
-  supabaseClient = createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
+  _supabase = createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  return supabaseClient;
+  return _supabase;
 }
 
-// Helper robusto para buscar usuário por e-mail (Case-Insensitive)
-async function findUserByEmail(supabase: any, email: string): Promise<string | null> {
-  const cleanEmail = email.trim().toLowerCase();
-  if (!cleanEmail) return null;
-
-  // Busca direta na tabela de perfis (profiles)
-  try {
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .select("id")
-      .ilike("email", cleanEmail)
-      .maybeSingle();
-    
-    if (profile?.id) {
-      console.log(`[CAKTO WEBHOOK] Aluno localizado na tabela de perfis (profiles): ${profile.id}`);
-      return profile.id;
-    }
-  } catch (err) {
-    console.error("[CAKTO WEBHOOK] Erro ao pesquisar na tabela de perfis:", err);
+// ----------------------------------------------------------------
+// Geração de senha temporária única por aluno
+// ----------------------------------------------------------------
+function gerarSenhaTemporaria(): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let senha = 'PL@';
+  for (let i = 0; i < 8; i++) {
+    senha += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-
-  // Busca nativa no Auth do Supabase por e-mail
-  try {
-    const { data, error } = await supabase.auth.admin.getUserByEmail(cleanEmail);
-    if (!error && data?.user?.id) {
-      console.log(`[CAKTO WEBHOOK] Aluno localizado nativamente no Auth (getUserByEmail): ${data.user.id}`);
-      return data.user.id;
-    }
-  } catch (err) {
-    console.warn("[CAKTO WEBHOOK] Método getUserByEmail não localizou (ou falhou):", err?.message || err);
-  }
-
-  // Varredura global no Auth (listUsers) com comparação case-insensitive
-  try {
-    const { data: usersData, error: listError } = await supabase.auth.admin.listUsers({
-      perPage: 1000
-    });
-    if (!listError && usersData?.users) {
-      const foundUser = usersData.users.find(
-        (u: any) => (u.email || "").trim().toLowerCase() === cleanEmail
-      );
-      if (foundUser?.id) {
-        console.log(`[CAKTO WEBHOOK] Aluno localizado na listagem global do Auth: ${foundUser.id}`);
-        return foundUser.id;
-      }
-    }
-  } catch (err) {
-    console.error("[CAKTO WEBHOOK] Erro ao listar usuários globais:", err);
-  }
-
-  return null;
+  return senha;
 }
 
-// Logica Assincrona de Processamento
-async function processCaktoEvent(payload: any) {
-  try {
-    const eventName = (payload?.event || payload?.event_name || "").toLowerCase();
-    const statusName = (payload?.status || payload?.data?.status || "").toLowerCase();
-    
-    const isApproved = 
-      eventName === "purchase_approved" || 
-      eventName === "payment_approved" ||
-      eventName === "approved" ||
-      eventName === "venda_aprovada" ||
-      eventName === "paga" ||
-      eventName === "paid" ||
-      statusName === "approved" ||
-      statusName === "paid" ||
-      statusName === "completed" ||
-      statusName === "success" ||
-      payload?.test === true || 
-      payload?.is_test === true ||
-      payload?.status === "aprovado";
+// ----------------------------------------------------------------
+// Extração de campos do payload Cakto
+// ----------------------------------------------------------------
+function extrairDadosCakto(body: any): {
+  email: string;
+  nome: string;
+  telefone: string;
+  produtoNome: string;
+  produtoId: string;
+  valor: number;
+  formaPagamento: string;
+  orderId: string;
+  status: string;
+  evento: string;
+} {
+  const evento: string =
+    body.event ?? body.evento ?? body.type ?? body.trigger ?? '';
+  const status: string =
+    body.status ??
+    body.payment_status ??
+    body.charge_status ??
+    body.sale_status ??
+    body.data?.status ??
+    '';
 
-    if (!isApproved) {
-      console.log(`[CAKTO WEBHOOK ASYNC] Evento ignorado (não é aprovação): Event='${payload?.event}' Status='${statusName}'`);
-      return;
-    }
+  const customer = body.customer ?? body.comprador ?? body.buyer ?? body.data?.customer ?? {};
+  const email: string = (
+    customer.email ??
+    body.email ??
+    body.customer_email ??
+    body.data?.email ??
+    ''
+  ).trim().toLowerCase();
 
-    const dataObj = payload?.data || payload || {};
-    const customerObj = dataObj?.customer || payload?.customer || {};
-    const productObj = dataObj?.product || payload?.product || {};
+  const nome: string =
+    customer.name ?? customer.nome ?? body.customer_name ?? body.nome ?? '';
 
-    const name = customerObj?.name || dataObj?.customer_name || dataObj?.name || payload?.customer_name || payload?.name || "Cliente";
-    const rawEmail = customerObj?.email || dataObj?.customer_email || dataObj?.email || payload?.customer_email || payload?.email;
-    const phone = customerObj?.phone || dataObj?.customer_phone || dataObj?.phone || payload?.customer_phone || payload?.phone || "";
+  const telefone: string =
+    customer.phone ?? customer.telefone ?? customer.cel ?? body.phone ?? '';
 
-    if (!rawEmail) {
-      console.error("[CAKTO WEBHOOK ASYNC] Erro: Email do cliente ausente no payload");
-      return;
-    }
+  const product = body.product ?? body.produto ?? body.data?.product ?? {};
+  const produtoNome: string =
+    product.name ?? product.nome ?? body.product_name ?? body.produto_nome ?? '';
+  const produtoId: string = product.id ?? product.codigo ?? body.product_id ?? '';
 
-    const email = rawEmail.trim().toLowerCase();
-    const produto = productObj?.name || dataObj?.product_name || dataObj?.product || payload?.product_name || payload?.product || "Biblioteca de Prompts";
-    const valor = dataObj?.amount || dataObj?.price || payload?.amount || payload?.price || 0;
-    const metodoPagamento = dataObj?.paymentMethod || dataObj?.payment_method || payload?.paymentMethod || payload?.payment_method || "não especificado";
-    const cakto_order_id = dataObj?.id || dataObj?.order_id || payload?.id || payload?.order_id || `cakto_${Date.now()}`;
+  const valor: number = Number(
+    body.amount ?? body.valor ?? body.price ?? body.data?.amount ?? 0
+  );
+  const formaPagamento: string =
+    body.payment_method ?? body.forma_pagamento ?? body.payment_type ?? '';
 
-    console.log(`[CAKTO WEBHOOK ASYNC] Processando liberação para: ${email} | Nome: ${name}`);
+  const orderId: string =
+    body.order_id ?? body.id ?? body.transaction_id ?? body.cakto_id ?? body.data?.id ?? '';
 
-    const supabase = getSupabaseClient();
-    let userId = await findUserByEmail(supabase, email);
+  return { email, nome, telefone, produtoNome, produtoId, valor, formaPagamento, orderId, status, evento };
+}
 
-    if (!userId) {
-      const defaultPassword = process.env.DEFAULT_PASSWORD || "CodigoIA@2024";
-      console.log(`[CAKTO WEBHOOK ASYNC] Aluno novo detectado. Criando conta de acesso com e-mail ${email}`);
-      
-      const { data: inviteData, error: inviteError } = await supabase.auth.admin.createUser({
-        email: email,
-        password: defaultPassword,
-        email_confirm: true,
-        user_metadata: { full_name: name, phone: phone }
-      });
+// ----------------------------------------------------------------
+// Verifica se o evento representa uma compra aprovada
+// ----------------------------------------------------------------
+function isCompraAprovada(evento: string, status: string): boolean {
+  const eventosAprovados = [
+    'purchase_approved', 'purchase.approved',
+    'sale_approved', 'sale.approved',
+    'payment_approved', 'payment.approved',
+    'compra_aprovada', 'venda_aprovada',
+    'order_paid', 'order.paid',
+  ];
+  const statusAprovados = [
+    'approved', 'paid', 'pago', 'paga',
+    'completed', 'concluido', 'concluída', 'active',
+  ];
 
-      if (inviteError) {
-        console.warn("[CAKTO WEBHOOK ASYNC] Erro ao tentar criar usuário via Admin API, tentando buscar se já existe:", inviteError.message);
-        userId = await findUserByEmail(supabase, email);
-        
-        if (!userId) {
-          console.error("[CAKTO WEBHOOK ASYNC] Falha crítica de persistência. Erro original do Supabase:", inviteError);
-          return;
-        }
-      } else {
-        userId = inviteData.user?.id;
-        console.log(`[CAKTO WEBHOOK ASYNC] Nova conta de usuário gerada com sucesso no Auth. ID: ${userId}`);
-      }
-    } else {
-      console.log(`[CAKTO WEBHOOK ASYNC] Usuário encontrado. ID associado: ${userId}`);
-    }
+  const evLower = evento.toLowerCase();
+  const stLower = status.toLowerCase();
 
-    if (!userId) {
-      console.error("[CAKTO WEBHOOK ASYNC] Erro: Não foi possível resolver o identificador único do aluno.");
-      return;
-    }
+  return (
+    eventosAprovados.some(e => evLower.includes(e)) ||
+    statusAprovados.some(s => stLower === s)
+  );
+}
 
-    console.log(`[CAKTO WEBHOOK ASYNC] Atualizando perfil na tabela 'profiles' para o ID: ${userId}`);
-    const { error: upsertPerfilError } = await supabase.from("profiles").upsert({
-      id: userId,
-      nome: name,
-      email: email,
-      telefone: phone,
-      acesso_ativo: true,
-      must_change_password: true
+// ----------------------------------------------------------------
+// Encontra usuário existente pelo email
+// ----------------------------------------------------------------
+async function encontrarUsuarioPorEmail(
+  supabase: SupabaseClient,
+  email: string
+): Promise<string | null> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('email', email)
+    .maybeSingle();
+
+  if (profile?.id) return profile.id;
+
+  const { data: { users } } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+  const found = users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+  return found?.id ?? null;
+}
+
+// ----------------------------------------------------------------
+// Processamento assíncrono do evento
+// ----------------------------------------------------------------
+async function processarEvento(body: any): Promise<void> {
+  const dados = extrairDadosCakto(body);
+
+  if (!dados.email) {
+    console.error('[webhook] Email não encontrado no payload:', JSON.stringify(body));
+    return;
+  }
+
+  if (!isCompraAprovada(dados.evento, dados.status)) {
+    console.log(`[webhook] Evento ignorado — evento="${dados.evento}" status="${dados.status}"`);
+    return;
+  }
+
+  console.log(`[webhook] Processando compra aprovada para: ${dados.email}`);
+
+  const supabase = getSupabase();
+  let userId = await encontrarUsuarioPorEmail(supabase, dados.email);
+  let usuarioNovo = false;
+
+  if (!userId) {
+    const senhaTemp = gerarSenhaTemporaria();
+
+    const { data: created, error: createError } = await supabase.auth.admin.createUser({
+      email: dados.email,
+      password: senhaTemp,
+      email_confirm: true,
+      user_metadata: {
+        nome: dados.nome,
+        telefone: dados.telefone,
+        senha_temp: senhaTemp,
+      },
     });
 
-    if (upsertPerfilError) {
-      console.error("[CAKTO WEBHOOK ASYNC] Erro no upsert do perfil na tabela 'profiles':", upsertPerfilError);
-      return;
-    } else {
-      console.log(`[CAKTO WEBHOOK ASYNC] Perfil atualizado em 'profiles' sucesso!`);
-    }
-
-    console.log(`[CAKTO WEBHOOK ASYNC] Cadastrando compra da ordem de ID: ${cakto_order_id}`);
-    const { error: compraError } = await supabase.from("compras").insert({
-      user_id: userId,
-      produto_nome: produto,
-      valor: valor,
-      metodo_pagamento: metodoPagamento,
-      cakto_order_id: cakto_order_id
-    });
-
-    if (compraError) {
-      if (compraError.code === '23505') { 
-        console.log(`[CAKTO WEBHOOK ASYNC] Compra de ID ${cakto_order_id} já cadastrada. Transação duplicada ignorada.`);
-      } else {
-        console.error("[CAKTO WEBHOOK ASYNC] Erro no registro da compra:", compraError);
+    if (createError) {
+      console.warn('[webhook] Erro ao criar usuário, tentando localizar:', createError.message);
+      userId = await encontrarUsuarioPorEmail(supabase, dados.email);
+      if (!userId) {
+        console.error('[webhook] Não foi possível criar nem localizar o usuário.');
         return;
       }
+    } else {
+      userId = created.user.id;
+      usuarioNovo = true;
+      console.log(`[webhook] Usuário criado: ${userId}`);
     }
-
-    console.log(`[CAKTO WEBHOOK ASYNC] Sucesso absoluto! Acesso e compra processados com sucesso para: ${email}`);
-
-  } catch (err: any) {
-    console.error("[CAKTO WEBHOOK ASYNC] Erro fatal durante processamento assíncrono:", err);
+  } else {
+    console.log(`[webhook] Usuário já existia: ${userId}`);
   }
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .upsert({
+      id: userId,
+      email: dados.email,
+      nome: dados.nome || null,
+      telefone: dados.telefone || null,
+      acesso_ativo: true,
+      must_change_password: usuarioNovo,
+    }, { onConflict: 'id' });
+
+  if (profileError) {
+    console.error('[webhook] Erro ao salvar profile:', profileError.message);
+  }
+
+  if (dados.orderId) {
+    const { error: compraError } = await supabase
+      .from('compras')
+      .insert({
+        user_id: userId,
+        produto_nome: dados.produtoNome || null,
+        produto_id: dados.produtoId || null,
+        valor: dados.valor || null,
+        forma_pagamento: dados.formaPagamento || null,
+        cakto_order_id: dados.orderId,
+      });
+
+    if (compraError) {
+      if (compraError.code === '23505') {
+        console.log(`[webhook] Compra duplicada ignorada: ${dados.orderId}`);
+      } else {
+        console.error('[webhook] Erro ao registrar compra:', compraError.message);
+      }
+    }
+  }
+
+  if (usuarioNovo) {
+    const { error: resetError } = await supabase.auth.admin.generateLink({
+      type: 'recovery',
+      email: dados.email,
+    });
+
+    if (resetError) {
+      console.warn('[webhook] Não foi possível gerar link de reset:', resetError.message);
+    } else {
+      console.log(`[webhook] E-mail de boas-vindas/reset enviado para: ${dados.email}`);
+    }
+  }
+
+  console.log(`[webhook] Concluído para ${dados.email}`);
 }
 
-export async function webhookCakto(req: any, res: any) {
-  try {
-    const payload = req.body;
-    console.log("[CAKTO WEBHOOK] Recebido Payload completo:", JSON.stringify(payload));
+// ----------------------------------------------------------------
+// Handler Express
+// ----------------------------------------------------------------
+export async function webhookCakto(req: Request, res: Response): Promise<void> {
+  const secretEsperado = process.env.CAKTO_WEBHOOK_SECRET;
+  if (secretEsperado) {
+    const secretRecebido =
+      req.headers['x-cakto-secret'] ??
+      req.headers['x-webhook-secret'] ??
+      req.headers['authorization']?.replace('Bearer ', '') ??
+      req.body?.secret;
 
-    const CAKTO_WEBHOOK_SECRET = process.env.CAKTO_WEBHOOK_SECRET || "";
-    const receivedSecret = payload?.secret || req.query?.secret || req.headers?.['x-cakto-token'] || req.headers?.['x-cakto-signature'];
-
-    if (CAKTO_WEBHOOK_SECRET) {
-      if (receivedSecret !== CAKTO_WEBHOOK_SECRET) {
-        console.warn(`[CAKTO WEBHOOK] Secret Inválido! Recebido: ${receivedSecret} | Esperado: ${CAKTO_WEBHOOK_SECRET}`);
-        return res.status(401).json({ error: "Secret inválido" });
-      }
-    } else {
-      console.warn("[CAKTO WEBHOOK] CAKTO_WEBHOOK_SECRET não está configurado nas variáveis de ambiente. Lógica de segurança ignorada.");
-    }
-
-    // Responde 200 imediatamente para a Cakto não ter timeout
-    res.status(200).json({ status: "recebido", message: "Webhook aceito, processamento iniciado." });
-
-    // Processa de forma assíncrona
-    processCaktoEvent(payload);
-
-  } catch (err: any) {
-    console.error("[Cakto Webhook Error]", err);
-    // Só responde se o res.status(200) ainda não tiver sido chamado
-    if (!res.headersSent) {
-      return res.status(500).json({ error: "Erro interno do servidor", details: err.message });
+    if (secretRecebido !== secretEsperado) {
+      console.warn('[webhook] Secret inválido recebido.');
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
   }
+
+  res.status(200).json({ received: true });
+
+  processarEvento(req.body).catch(err => {
+    console.error('[webhook] Erro inesperado no processamento:', err);
+  });
 }
