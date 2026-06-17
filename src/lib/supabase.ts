@@ -1,19 +1,25 @@
 import { createClient } from '@supabase/supabase-js';
 
-let url = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
-  .replace(/\/rest\/v1\/?$/, '')
-  .replace(/\/$/, '');
+let supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '';
 
-if (url && !url.startsWith('http')) {
-  url = `https://${url}`;
+// Limpar a URL caso o usuário tenha colado a URL da Data API (com /rest/v1/)
+supabaseUrl = supabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
+
+if (supabaseUrl && !supabaseUrl.startsWith('http')) {
+  supabaseUrl = `https://${supabaseUrl}`;
 }
 
-const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
-
-if (!url || !anonKey) {
-  throw new Error(
-    'Variáveis de ambiente não configuradas: VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY são obrigatórias.'
-  );
+let isValidUrl = false;
+try {
+  if (supabaseUrl) {
+    new URL(supabaseUrl);
+    isValidUrl = true;
+  }
+} catch (e) {
+  isValidUrl = false;
 }
 
-export const supabase = createClient(url, anonKey);
+export const supabase = (isValidUrl && supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
