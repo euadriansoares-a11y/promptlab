@@ -26,31 +26,113 @@ export default function Login() {
     try {
       if (isRegistering) {
         // Fluxo de Ativação / Cadastro Livre de Amarras:
-        // Envia para o servidor para sincronizar ou cobrir sob contingência de forma transparente
-        const res = await fetch('/api/register-access', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, password, name })
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok || !data.success) {
-          const detailStr = data.details ? ` Detalhes: ${data.details}` : '';
-          throw new Error((data.message || 'Houve um erro para registrar seu acesso local.') + detailStr);
+        // Primeiro tenta enviar para o servidor Express integrado.
+        let useFallback = false;
+        let errorMessage = '';
+
+        try {
+          const res = await fetch('/api/register-access', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: cleanEmail, password, name })
+          });
+
+          const contentType = res.headers.get('content-type') || '';
+          if (!res.ok || !contentType.includes('application/json')) {
+            useFallback = true;
+          } else {
+            const data = await res.json();
+            if (!data.success) {
+              const detailStr = data.details ? ` Detalhes: ${data.details}` : '';
+              throw new Error((data.message || 'Houve um erro para registrar seu acesso local.') + detailStr);
+            }
+
+            // Tenta fazer o sign-in automático com a senha definida para que o aluno entre direto no mesmo segundo
+            const { error: signInErr } = await supabase.auth.signInWithPassword({ 
+              email: cleanEmail, 
+              password 
+            });
+
+            if (signInErr) {
+              throw new Error('Acesso ativado com sucesso! Porém ocorreu uma falha ao iniciar sessão. Verifique sua senha e tente entrar pelo modo "Já tenho senha".');
+            }
+
+            setSuccessMsg("Acesso ativado e liberado!");
+          }
+        } catch (fetchErr: any) {
+          // Se falhar a conexão física ou der erro inesperado, tentamos o fallback no client
+          useFallback = true;
+          errorMessage = fetchErr.message || '';
         }
 
-        // Tenta fazer o sign-in automático com a senha definida para que o aluno entre direto no mesmo segundo
-        const { error: signInErr } = await supabase.auth.signInWithPassword({ 
-          email: cleanEmail, 
-          password 
-        });
+        // Se estivermos em ambiente estático (como Vercel) ou o servidor integrado falhar, fazemos cadastro direto via Supabase client
+        if (useFallback) {
+          console.log("[Login] Ativando fallback de cadastro direto no Supabase para ambientes estáticos (ex: Vercel)...");
+          
+          if (!supabase) {
+            throw new Error("Supabase não está configurado ou inicializado.");
+          }
 
-        if (signInErr) {
-          throw new Error('Acesso ativado com sucesso! Porém ocorreu uma falha ao iniciar sessão. Verifique sua senha e tente entrar pelo modo "Já tenho senha".');
+          // Tentamos fazer login direto caso o usuário já esteja cadastrado e apenas queira acessar
+          const { data: signInData, error: preSignInErr } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: password
+          });
+
+          if (!preSignInErr && signInData?.session) {
+            setSuccessMsg("Acesso liberado com sucesso!");
+            return;
+          }
+
+          // Se não deu para logar direto, criamos a conta no Supabase de forma nativa e direta
+          const { data, error: signUpErr } = await supabase.auth.signUp({
+            email: cleanEmail,
+            password: password,
+            options: {
+              data: {
+                nome: name,
+                is_client: true
+              }
+            }
+          });
+
+          if (signUpErr) {
+            // Tratamento amigável de erro clássico se o e-mail já estiver na base Supabase
+            if (signUpErr.message?.includes("already") || signUpErr.message?.includes("cadastrado") || signUpErr.message?.includes("exists")) {
+              throw new Error("Este e-mail de compra já possui cadastro ativo ou senha definida no sistema. Mude para a aba 'Fazer Login' ao lado para entrar.");
+            }
+            throw new Error(signUpErr.message || "Não foi possível criar o seu cadastro no Supabase.");
+          }
+
+          // Se cadastrou e iniciou sessão automaticamente
+          if (data?.session) {
+            // Tenta colocar o perfil na tabela de profiles por conveniência, sem travar se der erro de política de RLS
+            try {
+              await supabase.from('profiles').upsert({
+                id: data.user?.id,
+                email: cleanEmail,
+                nome: name,
+                acesso_ativo: true,
+                must_change_password: false
+              }, { onConflict: 'id' });
+
+              await supabase.from('perfis').upsert({
+                id: data.user?.id,
+                email: cleanEmail,
+                nome: name,
+                acesso_ativo: true,
+                must_change_password: false
+              }, { onConflict: 'id' });
+            } catch (pErr) {
+              console.warn("Dica de banco: Perfil não criado na tabela de profiles, mas o login funcionará 100% normalmente.", pErr);
+            }
+
+            setSuccessMsg("Acesso ativado e liberado!");
+          } else {
+            // Se o Supabase exigir confirmação de e-mail por estar configurado assim no painel do usuário
+            setSuccessMsg("Inscrição efetuada! Por favor, verifique sua caixa de e-mail para confirmar seu link de ativação.");
+          }
         }
-
-        setSuccessMsg("Acesso ativado e liberado!");
 
       } else {
         // Login normal para quem já tem a senha cadastrada
