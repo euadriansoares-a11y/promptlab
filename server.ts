@@ -17,6 +17,63 @@ async function startServer() {
   // Rota do Webhook da Cakto
   app.post("/webhook/cakto", webhookCakto);
 
+  // Rota de Primeiro Acesso (Zero Burocracia)
+  app.post("/api/register-access", async (req, res) => {
+    const { email, password, name } = req.body;
+    
+    if (!email || !password || !email.includes("@")) {
+      return res.status(400).json({ success: false, message: "E-mail e Senha são obrigatórios e válidos." });
+    }
+
+    try {
+      const { getSupabase } = await import("./cakto-webhook");
+      const supabase = getSupabase();
+      const cleanEmail = email.trim().toLowerCase();
+
+      // 1. Procurar o usuário na base (se o webhook da Cakto já rodou, ele estará lá)
+      const { data } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+      const users = (data?.users || []) as any[];
+      const foundUser = users.find(u => u.email?.toLowerCase() === cleanEmail);
+
+      if (foundUser) {
+        // Webhook confirmou a compra. Atualiza a senha generica para a senha que o cliente escolheu.
+        await supabase.auth.admin.updateUserById(foundUser.id, {
+          password: password,
+          user_metadata: { nome: name || foundUser.user_metadata?.nome, is_client: true }
+        });
+
+        // Garante flag ativa
+        await supabase.from('profiles').upsert({ id: foundUser.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
+        await supabase.from('perfis').upsert({ id: foundUser.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
+
+        return res.status(200).json({ success: true, message: "Acesso atualizado e liberado com sucesso!" });
+      } else {
+        // O webhook não chegou a tempo ou deu erro. 
+        // Para manter a "Tolerância Zero a Problemas" do criador, vamos liberar o acesso mesmo assim.
+        const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
+          email: cleanEmail,
+          password: password,
+          email_confirm: true,
+          user_metadata: { nome: name, self_registered: true, is_client: true }
+        });
+
+        if (createErr) {
+          return res.status(500).json({ success: false, message: "Não foi possível criar o seu acesso local.", details: createErr.message });
+        }
+
+        if (newUser.user) {
+          await supabase.from('profiles').upsert({ id: newUser.user.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
+          await supabase.from('perfis').upsert({ id: newUser.user.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
+        }
+
+        return res.status(200).json({ success: true, message: "Acesso criado sob contingência com sucesso!" });
+      }
+
+    } catch (e: any) {
+      return res.status(500).json({ success: false, message: "Erro interno no servidor.", details: e.message });
+    }
+  });
+
   // Rota de Teste de Conexão com o Supabase
   app.get("/webhook/test-supabase", async (req, res) => {
     try {
