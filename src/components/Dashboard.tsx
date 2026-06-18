@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { CATEGORIES, PROMPTS_DATA } from '../data';
+import { CATEGORIES } from '../data';
 import { Copy, Check, Sparkles, LogOut, Terminal, Heart, ChevronRight, Zap, Play, X, Bell, Users, LayoutGrid, UserCircle, Star, Network } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import EstrategiasTab from './EstrategiasTab';
@@ -84,14 +84,9 @@ export default function Dashboard() {
           .select('*')
           .order('id', { ascending: true });
         
-        if (data && data.length > 0) {
-          setPrompts(data);
-        } else {
-          setPrompts(PROMPTS_DATA);
-        }
+        if (data) setPrompts(data);
       } catch (err) {
-        console.error("Erro ao iniciar painel ou buscar banco. Ativando PROMPTS_DATA estáticos como contingência:", err);
-        setPrompts(PROMPTS_DATA);
+        console.error("Erro ao iniciar painel:", err);
       } finally {
         setIsLoading(false);
       }
@@ -100,11 +95,8 @@ export default function Dashboard() {
   }, []);
 
   const handleSignOut = async () => {
-    localStorage.removeItem('codigodaia_bypass_session');
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-    window.location.reload();
+    if (!supabase) return;
+    await supabase.auth.signOut();
   };
 
   const handleCopyPrompt = async (prompt: any) => {

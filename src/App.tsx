@@ -6,20 +6,9 @@ import Dashboard from './components/Dashboard';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [fallbackSession, setFallbackSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Verificar se há uma sessão de contingência ativa localmente
-    const localSession = localStorage.getItem('codigodaia_bypass_session');
-    if (localSession) {
-      try {
-        setFallbackSession(JSON.parse(localSession));
-      } catch (err) {
-        localStorage.removeItem('codigodaia_bypass_session');
-      }
-    }
-
     if (!supabase) {
       setLoading(false);
       return;
@@ -65,14 +54,5 @@ export default function App() {
     );
   }
 
-  const handleBypass = (userEmail: string, userName: string) => {
-    const virtualSession = {
-      user: { email: userEmail, name: userName || "Membro de Contingência", id: "contingency_user" },
-      expires_at: Math.floor(Date.now() / 1000) + 3600 * 24 * 30 // 30 dias de validade
-    };
-    localStorage.setItem('codigodaia_bypass_session', JSON.stringify(virtualSession));
-    setFallbackSession(virtualSession);
-  };
-
-  return (session || fallbackSession) ? <Dashboard /> : <Login onBypass={handleBypass} />;
+  return session ? <Dashboard /> : <Login />;
 }
