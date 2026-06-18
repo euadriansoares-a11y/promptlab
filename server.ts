@@ -25,31 +25,80 @@ async function startServer() {
       return res.status(400).json({ success: false, message: "E-mail e Senha são obrigatórios e válidos." });
     }
 
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: "A senha precisa conter no mínimo 6 caracteres por segurança." });
+    }
+
     try {
       const { getSupabase } = await import("./cakto-webhook");
       const supabase = getSupabase();
       const cleanEmail = email.trim().toLowerCase();
 
-      // 1. Procurar o usuário na base (se o webhook da Cakto já rodou, ele estará lá)
-      const { data } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-      const users = (data?.users || []) as any[];
-      const foundUser = users.find(u => u.email?.toLowerCase() === cleanEmail);
+      // 1. Procurar o usuário na base (primeiro pelas tabelas, depois com paginação no Auth)
+      let foundUserId: string | null = null;
+      let foundUserMetadata: any = null;
 
-      if (foundUser) {
-        // Webhook confirmou a compra. Atualiza a senha generica para a senha que o cliente escolheu.
-        await supabase.auth.admin.updateUserById(foundUser.id, {
+      // Busca na tabela profiles do Supabase
+      try {
+        const { data: dbProfile } = await supabase.from('profiles').select('id').eq('email', cleanEmail).maybeSingle();
+        if (dbProfile?.id) foundUserId = dbProfile.id;
+      } catch (dbErr) {
+        console.warn("[register-access] Erro ao buscar em profiles:", dbErr);
+      }
+
+      // Se não achou na tabela profiles, busca na tabela perfis
+      if (!foundUserId) {
+        try {
+          const { data: dbPerfis } = await supabase.from('perfis').select('id').eq('email', cleanEmail).maybeSingle();
+          if (dbPerfis?.id) foundUserId = dbPerfis.id;
+        } catch (dbErr) {
+          console.warn("[register-access] Erro ao buscar em perfis:", dbErr);
+        }
+      }
+
+      // Se ainda não achou, fazemos busca paginada no Auth para até 5 páginas (5000 usuários)
+      if (!foundUserId) {
+        try {
+          let page = 1;
+          while (page <= 5) {
+            const { data: authData, error: authErr } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+            if (authErr || !authData?.users || authData.users.length === 0) break;
+            const u = authData.users.find((user: any) => user.email?.toLowerCase() === cleanEmail);
+            if (u) {
+              foundUserId = u.id;
+              foundUserMetadata = u.user_metadata;
+              break;
+            }
+            if (authData.users.length < 1000) break;
+            page++;
+          }
+        } catch (authScanErr) {
+          console.warn("[register-access] Erro ao escanear usuários Auth:", authScanErr);
+        }
+      }
+
+      if (foundUserId) {
+        // Usuário encontrado! Atualizamos a senha e garantimos perfis habilitados
+        const { error: updateErr } = await supabase.auth.admin.updateUserById(foundUserId, {
           password: password,
-          user_metadata: { nome: name || foundUser.user_metadata?.nome, is_client: true }
+          user_metadata: { nome: name || foundUserMetadata?.nome, is_client: true }
         });
 
-        // Garante flag ativa
-        await supabase.from('profiles').upsert({ id: foundUser.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
-        await supabase.from('perfis').upsert({ id: foundUser.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
+        if (updateErr) {
+          return res.status(500).json({ 
+            success: false, 
+            message: "Houve um erro ao atualizar a senha do usuário existente.", 
+            details: updateErr.message 
+          });
+        }
+
+        // Garante flag ativa nas tabelas
+        await supabase.from('profiles').upsert({ id: foundUserId, email: cleanEmail, acesso_ativo: true, nome: name }, { onConflict: 'id' });
+        await supabase.from('perfis').upsert({ id: foundUserId, email: cleanEmail, acesso_ativo: true, nome: name }, { onConflict: 'id' });
 
         return res.status(200).json({ success: true, message: "Acesso atualizado e liberado com sucesso!" });
       } else {
-        // O webhook não chegou a tempo ou deu erro. 
-        // Para manter a "Tolerância Zero a Problemas" do criador, vamos liberar o acesso mesmo assim.
+        // Usuário não existe, criamos um novo
         const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
           email: cleanEmail,
           password: password,
@@ -58,15 +107,35 @@ async function startServer() {
         });
 
         if (createErr) {
-          return res.status(500).json({ success: false, message: "Não foi possível criar o seu acesso local.", details: createErr.message });
+          // Caso ocorra erro de duplicidade que passou pelas buscas acima por algum motivo de race condition ou cache:
+          if (createErr.message?.includes("already") || createErr.message?.includes("duplicado") || createErr.message?.includes("exists")) {
+            // Tenta obter o perfil baseado em uma busca ampla sem restrição
+            const { data: authData } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+            const u = authData?.users?.find((user: any) => user.email?.toLowerCase() === cleanEmail);
+            if (u) {
+              await supabase.auth.admin.updateUserById(u.id, {
+                password: password,
+                user_metadata: { nome: name || u.user_metadata?.nome, is_client: true }
+              });
+              await supabase.from('profiles').upsert({ id: u.id, email: cleanEmail, acesso_ativo: true, nome: name }, { onConflict: 'id' });
+              await supabase.from('perfis').upsert({ id: u.id, email: cleanEmail, acesso_ativo: true, nome: name }, { onConflict: 'id' });
+              return res.status(200).json({ success: true, message: "Acesso atualizado e liberado com sucesso!" });
+            }
+          }
+
+          return res.status(500).json({ 
+            success: false, 
+            message: "Não foi possível criar o seu acesso local no Supabase.", 
+            details: createErr.message 
+          });
         }
 
         if (newUser.user) {
-          await supabase.from('profiles').upsert({ id: newUser.user.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
-          await supabase.from('perfis').upsert({ id: newUser.user.id, email: cleanEmail, acesso_ativo: true }, { onConflict: 'id' });
+          await supabase.from('profiles').upsert({ id: newUser.user.id, email: cleanEmail, acesso_ativo: true, nome: name }, { onConflict: 'id' });
+          await supabase.from('perfis').upsert({ id: newUser.user.id, email: cleanEmail, acesso_ativo: true, nome: name }, { onConflict: 'id' });
         }
 
-        return res.status(200).json({ success: true, message: "Acesso criado sob contingência com sucesso!" });
+        return res.status(200).json({ success: true, message: "Acesso criado e liberado com sucesso!" });
       }
 
     } catch (e: any) {

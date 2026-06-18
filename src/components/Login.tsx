@@ -36,7 +36,8 @@ export default function Login() {
         const data = await res.json();
         
         if (!res.ok || !data.success) {
-          throw new Error(data.message || 'Houve um erro para registrar seu acesso local.');
+          const detailStr = data.details ? ` Detalhes: ${data.details}` : '';
+          throw new Error((data.message || 'Houve um erro para registrar seu acesso local.') + detailStr);
         }
 
         // Tenta fazer o sign-in automático com a senha definida para que o aluno entre direto no mesmo segundo
@@ -70,7 +71,7 @@ export default function Login() {
   };
 
   const handleWhatsApp = () => {
-    const numeroUrl = "5511999999999";
+    const numeroUrl = "5515996792372";
     const mensagem = encodeURIComponent("Olá Adrian! Estou com problemas para acessar a Biblioteca de Prompts e preciso de suporte com meu acesso.");
     window.open(`https://wa.me/${numeroUrl}?text=${mensagem}`, '_blank');
   };
