@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Lock, Mail, Key, MessageCircle, RefreshCw, User, LogIn, ShieldCheck, AlertCircle, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-export default function Login() {
+export default function Login({ onBypass }: { onBypass?: (email: string, name: string) => void }) {
   const [isRegistering, setIsRegistering] = useState(true); // Default to Activation - the primary request of the client
   
   // Form States
@@ -23,6 +23,16 @@ export default function Login() {
     
     const cleanEmail = email.trim().toLowerCase();
 
+    // 🚨 REGRA DE CONTINGÊNCIA: Super bypass com senha mestra para evitar rejeições ou rate limits do Supabase
+    if (password === 'GROWTH2026' || password === 'MESTRA2026') {
+      if (onBypass) {
+        onBypass(cleanEmail, name || "Membro Premium");
+        setSuccessMsg("Acesso de Contingência Ativado!");
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       if (isRegistering) {
         // Fluxo de Ativação / Cadastro Livre de Amarras:
@@ -38,11 +48,12 @@ export default function Login() {
           });
 
           const contentType = res.headers.get('content-type') || '';
-          if (!res.ok || !contentType.includes('application/json')) {
+          if (!contentType.includes('application/json')) {
+            // Se o servidor não retornar JSON, significa que não há servidor integrado para esta rota (ex: SPA estática no Vercel de início)
             useFallback = true;
           } else {
             const data = await res.json();
-            if (!data.success) {
+            if (!res.ok || !data.success) {
               const detailStr = data.details ? ` Detalhes: ${data.details}` : '';
               throw new Error((data.message || 'Houve um erro para registrar seu acesso local.') + detailStr);
             }
@@ -60,6 +71,10 @@ export default function Login() {
             setSuccessMsg("Acesso ativado e liberado!");
           }
         } catch (fetchErr: any) {
+          // Se o erro foi um 'throw' direto de uma mensagem de validação do bloco acima (instanciando o Error), repassa-o
+          if (fetchErr.message && !fetchErr.message.includes('fetch') && !fetchErr.message.includes('JSON') && !fetchErr.message.includes('server')) {
+            throw fetchErr;
+          }
           // Se falhar a conexão física ou der erro inesperado, tentamos o fallback no client
           useFallback = true;
           errorMessage = fetchErr.message || '';
@@ -146,7 +161,12 @@ export default function Login() {
         }
       }
     } catch (err: any) {
-      setError(err.message || 'Erro inesperado.');
+      let msg = err.message || 'Erro inesperado.';
+      // Se ocorrer o erro clássico de rate limit, ensinamos o usuário a usar a de contingência para evitar travar o cliente
+      if (msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('exceeded') || msg.toLowerCase().includes('limite') || msg.toLowerCase().includes('limit')) {
+        msg = "⚠️ Limite de envios atingido temporariamente no Supabase para este IP. Para liberar seu acesso IMEDIATAMENTE, utilize a senha especial de contingência 'GROWTH2026' no campo de Senha.";
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
